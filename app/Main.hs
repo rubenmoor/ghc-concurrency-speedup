@@ -6,7 +6,7 @@ module Main where
 
 import Control.Concurrent (getNumCapabilities)
 import qualified Control.Concurrent.Async as Async
-import Control.DeepSeq (NFData, deepseq)
+import Control.DeepSeq (NFData, deepseq, force)
 import qualified Control.Scheduler as Scheduler
 import Data.Foldable (Foldable (foldl'))
 import Data.List (transpose)
@@ -16,6 +16,8 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO as Text
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
+import Control.Exception (evaluate)
+import Control.Monad ((<=<))
 
 {-
 a function that does some meaningless manipulation
@@ -27,13 +29,6 @@ dummyFunc hyph =
     let lsFoo = replicate 600 hyph
      in Text.takeEnd 100 $
             foldl' (\strRes str -> Text.head str `Text.cons` strRes) "" lsFoo
-
-fmapForce :: NFData b => (a -> b) -> [a] -> [b]
-fmapForce _ [] = []
-fmapForce f (x : xs) =
-    let y = f x
-        ys = y `deepseq` fmapForce f xs
-     in y : ys
 
 exitUsage :: IO a
 exitUsage = do
@@ -53,13 +48,14 @@ main = do
         _ -> exitUsage
 
     nj <- getNumCapabilities
+    putStrLn $ "Running " <> show nj <> " jobs."
     ls <- Text.lines <$> Text.readFile file
     r <-
         if nj == 1
-            then pure $ fmapForce dummyFunc ls
+            then traverse (evaluate . force dummyFunc) ls
             else
                 mconcat
                     <$> concF
-                        (pure . fmapForce dummyFunc)
+                        (traverse $ evaluate . force dummyFunc)
                         (transpose $ chunksOf (10 * nj) ls)
     putStrLn $ last r `seq` "done"
